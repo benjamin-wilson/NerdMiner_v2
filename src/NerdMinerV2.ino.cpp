@@ -114,7 +114,10 @@ void setup()
   BaseType_t res2 = xTaskCreatePinnedToCore(runStratumWorker, "Stratum", 15000, (void*)name, 3, NULL,1);
 
 
-  /******** CREATE MINER TASKS *****/
+ #if defined(NERD_NOS)
+
+ #else
+   /******** CREATE MINER TASKS *****/
   //for (size_t i = 0; i < THREADS; i++) {
   //  char *name = (char*) malloc(32);
   //  sprintf(name, "(%d)", i);
@@ -128,8 +131,11 @@ void setup()
   esp_task_wdt_add(minerTask1);
   esp_task_wdt_add(minerTask2);
 
+
+ #endif
   /******** MONITOR SETUP *****/
   setup_monitor();
+
 }
 
 void app_error_fault_handler(void *arg) {

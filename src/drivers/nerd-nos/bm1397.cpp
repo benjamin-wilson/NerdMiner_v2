@@ -1,3 +1,7 @@
+#include "bm1397.h"
+#include "crc.h"
+#include "serial.h"
+
 #define BM1397_RST_PIN NERD_NOS_GPIO_RST
 
 #define TYPE_JOB 0x20
@@ -73,6 +77,47 @@ static void _send_BM1397(uint8_t header, uint8_t *data, uint8_t data_len, bool d
     free(buf);
 }
 
+static int _largest_power_of_two(int num)
+{
+    int power = 0;
+
+    while (num > 1) {
+        num = num >> 1;
+        power++;
+    }
+
+    return 1 << power;
+}
+
+
+void BM1397_set_job_difficulty_mask(int difficulty)
+{
+
+    // Default mask of 256 diff
+    unsigned char job_difficulty_mask[9] = {0x00, TICKET_MASK, 0b00000000, 0b00000000, 0b00000000, 0b11111111};
+
+    // The mask must be a power of 2 so there are no holes
+    // Correct:  {0b00000000, 0b00000000, 0b11111111, 0b11111111}
+    // Incorrect: {0b00000000, 0b00000000, 0b11100111, 0b11111111}
+    difficulty = _largest_power_of_two(difficulty) - 1; // (difficulty - 1) if it is a pow 2 then step down to second largest for more hashrate sampling
+
+    // convert difficulty into char array
+    // Ex: 256 = {0b00000000, 0b00000000, 0b00000000, 0b11111111}, {0x00, 0x00, 0x00, 0xff}
+    // Ex: 512 = {0b00000000, 0b00000000, 0b00000001, 0b11111111}, {0x00, 0x00, 0x01, 0xff}
+    for (int i = 0; i < 4; i++)
+    {
+        char value = (difficulty >> (8 * i)) & 0xFF;
+        // The char is read in backwards to the register so we need to reverse them
+        // So a mask of 512 looks like 0b00000000 00000000 00000001 1111111
+        // and not 0b00000000 00000000 10000000 1111111
+
+        job_difficulty_mask[5 - i] = _reverse_bits(value);
+    }
+
+    ESP_LOGI(TAG, "Setting job ASIC mask to %d", difficulty);
+
+    _send_BM1397((TYPE_CMD | GROUP_ALL | CMD_WRITE), job_difficulty_mask, 6, false);
+}
 
 static void _send_init(uint64_t frequency)
 {

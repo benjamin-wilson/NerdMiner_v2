@@ -1,0 +1,1 @@
+#define CRC5_MASK 0x1F

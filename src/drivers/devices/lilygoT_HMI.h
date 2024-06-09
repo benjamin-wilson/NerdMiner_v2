@@ -39,11 +39,6 @@
 #endif
 
 
-#define NERD_NOS
-#define NERD_NOS_GPIO_TX (11)
-#define NERD_NOS_GPIO_RX (10)
-#define NERD_NOS_GPIO_RST (9)
-#define NERD_NOS_GPIO_TMP (8)
 
 
 #endif

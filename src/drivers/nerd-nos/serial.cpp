@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include <drivers/devices/lilygoT_HMI.h>
+#include "driver/uart.h"
 
 #include "serial.h"
 
@@ -26,12 +26,12 @@ void SERIAL_set_baud(int baud)
 
 int SERIAL_send(uint8_t *data, int len, bool debug)
 {
-    if (debug)
-    {
-        printf("->");
-        prettyHex((unsigned char *)data, len);
-        printf("\n");
-    }
+    // if (debug)
+    // {
+    //     printf("->");
+    //     prettyHex((unsigned char *)data, len);
+    //     printf("\n");
+    // }
 
     return uart_write_bytes(UART_NUM_1, (const char *)data, len);
 }

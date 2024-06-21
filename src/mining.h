@@ -15,6 +15,7 @@
 void runMonitor(void *name);
 void runStratumWorker(void *name);
 void runMiner(void *name);
+void runASIC(void *name);
 String printLocalTime(void);
 
 void resetStat();

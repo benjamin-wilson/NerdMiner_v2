@@ -14,6 +14,9 @@
 #include "drivers/displays/display.h"
 #include "drivers/storage/SDCard.h"
 #include "timeconst.h"
+#include "drivers/nerd-nos/bm1397.h"
+#include "drivers/nerd-nos/serial.h"
+
 
 //3 seconds WDT
 #define WDT_TIMEOUT 3
@@ -37,7 +40,12 @@ SDCard SDCrd = SDCard();
 unsigned long start = millis();
 const char* ntpServer = "pool.ntp.org";
 
-//void runMonitor(void *name);
+void printBufferHex(const uint8_t* buf, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        Serial.printf("%02X ", buf[i]);
+    }
+    Serial.println();
+}
 
 /********* INIT *****/
 void setup()
@@ -119,6 +127,13 @@ void setup()
  #endif
 
  #if defined(NERD_NOS)
+    SERIAL_init();
+    BM1397_init(100);
+
+  TaskHandle_t ASICTask = NULL;
+  xTaskCreate(runMiner, "Asic0", 6000, (void*)0, 1, &ASICTask);
+ 
+  esp_task_wdt_add(ASICTask);
 
  #else
    /******** CREATE MINER TASKS *****/
@@ -141,6 +156,8 @@ void setup()
   setup_monitor();
 
 }
+
+
 
 void app_error_fault_handler(void *arg) {
   // Get stack errors

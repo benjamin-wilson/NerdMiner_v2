@@ -9,13 +9,26 @@
 
 void SERIAL_init() {
     
-    Serial.begin(115200); // Initialize serial communication
     Serial.println("Initializing serial");
-
-    // No need to configure UART parameters manually in Arduino-ESP32
+    // Configure UART1 parameters
+    uart_config_t uart_config = {
+        .baud_rate = 115200,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .rx_flow_ctrl_thresh = 122,
+    };
+    // Configure UART1 parameters
+    uart_param_config(UART_NUM_1, &uart_config);
     // Set UART1 pins(TX: IO17, RX: I018)
-    // Serial.setTX(NERD_NOS_GPIO_TX);
-    // Serial.setRx(NERD_NOS_GPIO_RX);
+    uart_set_pin(UART_NUM_1, GPIO_NUM_1, GPIO_NUM_2, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+
+    // Install UART driver (we don't need an event queue here)
+    // tx buffer 0 so the tx time doesn't overlap with the job wait time
+    //  by returning before the job is written
+    uart_driver_install(UART_NUM_1, BUF_SIZE * 2, BUF_SIZE * 2, 0, NULL, 0);
+
 }
 
 void SERIAL_set_baud(int baud)

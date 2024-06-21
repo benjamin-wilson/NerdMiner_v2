@@ -1,12 +1,12 @@
 #include "bm1397.h"
-#include "crc.h"
+
 #include "serial.h"
 #include <Arduino.h>
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "../devices/device.h"
-
+#include "crc.h"
 
 
 #define BM1397_RST_PIN NERD_NOS_GPIO_RST
@@ -39,14 +39,45 @@
 #define TICKET_MASK 0x14
 #define MISC_CONTROL 0x18
 
+typedef struct __attribute__((__packed__))
+{
+    uint8_t preamble[2];
+    uint32_t nonce;
+    uint8_t midstate_num;
+    uint8_t job_id;
+    uint8_t crc;
+} asic_result;
+
 
 static uint8_t asic_response_buffer[CHUNK_SIZE];
 static uint32_t prev_nonce = 0;
 static task_result result;
 
+static uint32_t increment_bitmask(const uint32_t value, const uint32_t mask)
+{
+    // if mask is zero, just return the original value
+    if (mask == 0)
+        return value;
+
+    uint32_t carry = (value & mask) + (mask & -mask);      // increment the least significant bit of the mask
+    uint32_t overflow = carry & ~mask;                     // find overflowed bits that are not in the mask
+    uint32_t new_value = (value & ~mask) | (carry & mask); // set bits according to the mask
+
+    // Handle carry propagation
+    if (overflow > 0)
+    {
+        uint32_t carry_mask = (overflow << 1);                // shift left to get the mask where carry should be propagated
+        new_value = increment_bitmask(new_value, carry_mask); // recursively handle carry propagation
+    }
+
+    return new_value;
+}
+
+
+
 static void _reset(void)
 {
-    gpio_set_level(NERD_NOS_GPIO_RST, 0);
+    gpio_set_level(BM1397_RST_PIN, 0);
 
     // delay for 100ms
     vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -195,12 +226,13 @@ static void _send_read_address(void)
 
 void BM1397_init(uint64_t frequency)
 {
+    Serial.println("Initializing BM1397");
     ESP_LOGI(TAG, "Initializing BM1397");
 
     memset(asic_response_buffer, 0, sizeof(asic_response_buffer));
 
 
-    //esp_rom_gpio_pad_select_gpio(BM1397_RST_PIN);
+    //sp_rom_gpio_pad_select_gpio(BM1397_RST_PIN);
     gpio_set_direction(BM1397_RST_PIN, GPIO_MODE_OUTPUT);
 
     // reset the bm1397
@@ -312,4 +344,94 @@ void BM1397_send_hash_frequency(float frequency)
     vTaskDelay(10 / portTICK_PERIOD_MS);
 
     ESP_LOGI(TAG, "Setting Frequency to %.2fMHz (%.2f)", frequency, newf);
+}
+
+asic_result *BM1397_receive_work(void)
+{
+
+    // wait for a response, wait time is pretty arbitrary
+    int received = SERIAL_rx(asic_response_buffer, 9, 60000);
+
+    if (received < 0)
+    {
+        ESP_LOGI(TAG, "Error in serial RX");
+        return NULL;
+    }
+    else if (received == 0)
+    {
+        // Didn't find a solution, restart and try again
+        return NULL;
+    }
+
+    if (received != 9 || asic_response_buffer[0] != 0xAA || asic_response_buffer[1] != 0x55)
+    {
+        ESP_LOGI(TAG, "Serial RX invalid %i", received);
+        //ESP_LOG_BUFFER_HEX(TAG, asic_response_buffer, received);
+        return NULL;
+    }
+
+    return (asic_result *)asic_response_buffer;
+}
+
+
+task_result *BM1397_proccess_work()
+{
+
+    asic_result *asic_result = BM1397_receive_work();
+
+    if (asic_result == NULL)
+    {
+        ESP_LOGI(TAG, "return null");
+        return NULL;
+    }
+
+    uint8_t nonce_found = 0;
+    uint32_t first_nonce = 0;
+
+    uint8_t rx_job_id = asic_result->job_id & 0xfc;
+    uint8_t rx_midstate_index = asic_result->job_id & 0x03;
+
+    //GlobalState *GLOBAL_STATE = (GlobalState *)pvParameters;
+    // if (GLOBAL_STATE->valid_jobs[rx_job_id] == 0)
+    // {
+    //     ESP_LOGI(TAG, "Invalid job nonce found, id=%d", rx_job_id);
+    //     return NULL;
+    // }
+
+uint32_t rolled_version = 0;
+
+    // uint32_t rolled_version = GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[rx_job_id]->version;
+    // for (int i = 0; i < rx_midstate_index; i++)
+    // {
+    //     rolled_version = increment_bitmask(rolled_version, GLOBAL_STATE->ASIC_TASK_MODULE.active_jobs[rx_job_id]->version_mask);
+    // }
+
+    // ASIC may return the same nonce multiple times
+    // or one that was already found
+    // most of the time it behavies however
+    if (nonce_found == 0)
+    {
+        first_nonce = asic_result->nonce;
+        nonce_found = 1;
+    }
+    else if (asic_result->nonce == first_nonce)
+    {
+        // stop if we've already seen this nonce
+        return NULL;
+    }
+
+    if (asic_result->nonce == prev_nonce)
+    {
+        return NULL;
+    }
+    else
+    {
+        prev_nonce = asic_result->nonce;
+    }
+
+    result.job_id = rx_job_id;
+    result.nonce = asic_result->nonce;
+    result.rolled_version = rolled_version;
+
+    return &result;
 }

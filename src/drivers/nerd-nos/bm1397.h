@@ -1,11 +1,8 @@
 #include <stdio.h>
 #include "common.h"
-
+#include "crc.h"
 
 #define CRC5_MASK 0x1F
-
-void BM1397_send_hash_frequency(float frequency);
-int BM1397_set_default_baud(void);
 
 
 typedef struct
@@ -38,3 +35,8 @@ typedef struct __attribute__((__packed__))
     uint8_t midstate2[32];
     uint8_t midstate3[32];
 } job_packet;
+
+void BM1397_init(uint64_t frequency);
+int BM1397_set_default_baud(void);
+void BM1397_send_hash_frequency(float frequency);
+task_result * BM1397_proccess_work();

@@ -367,6 +367,154 @@ void runMiner(void * task_id) {
   }
 }
 
+void runASIC(void * task_id) {
+
+  unsigned int miner_id = (uint32_t)task_id;
+
+  Serial.printf("[MINER]  %d  Started runASIC Task!\n", miner_id);
+  
+  while(1){
+
+    //Wait new job
+    while(1){
+      if(mMiner.newJob==true || mMiner.newJob2==true) break;
+      vTaskDelay(100 / portTICK_PERIOD_MS); //Small delay
+    }
+    vTaskDelay(10 / portTICK_PERIOD_MS); //Small delay to join both mining threads
+
+    if(mMiner.newJob)
+      mMiner.newJob = false; //Clear newJob flag
+    else if(mMiner.newJob2)
+      mMiner.newJob2 = false; //Clear newJob flag
+    mMiner.inRun = true; //Set inRun flag
+
+    mMonitor.NerdStatus = NM_hashing;
+
+    //Prepare Premining data
+    nerdSHA256_context nerdMidstate; //NerdShaplus
+    uint8_t hash[32];
+    
+
+    //Calcular midstate
+    nerd_mids(&nerdMidstate, mMiner.bytearray_blockheader); //NerdShaplus
+
+
+    // search a valid nonce
+    unsigned long nonce = TARGET_NONCE - MAX_NONCE;
+    // split up odd/even nonces between miner tasks
+    nonce += miner_id;
+    uint32_t startT = micros();
+    unsigned char *header64;
+    // each miner thread needs to track its own blockheader template
+    uint8_t temp;
+
+    memcpy(mMiner.bytearray_blockheader2, &mMiner.bytearray_blockheader, 80);
+    if (miner_id == 0)
+      header64 = mMiner.bytearray_blockheader + 64;
+    else
+      header64 = mMiner.bytearray_blockheader2 + 64;
+    
+    bool is16BitShare=true;  
+    Serial.println(">>> STARTING TO HASH NONCES");
+    while(true) {
+      if (miner_id == 0)
+        memcpy(mMiner.bytearray_blockheader + 76, &nonce, 4);
+      else
+        memcpy(mMiner.bytearray_blockheader2 + 76, &nonce, 4);
+
+
+      //nerd_double_sha2(&nerdMidstate, header64, hash);
+      is16BitShare=nerd_sha256d(&nerdMidstate, header64, hash); //Boosted 80Khs sha
+
+      /*Serial.print("hash1: ");
+      for (size_t i = 0; i < 32; i++)
+            Serial.printf("%02x", hash[i]);
+        Serial.println("");  
+      Serial.print("hash2: ");
+      for (size_t i = 0; i < 32; i++)
+            Serial.printf("%02x", hash2[i]);
+        Serial.println("");  */
+
+      hashes++;
+      if (nonce > TARGET_NONCE) break; //exit
+      if(!mMiner.inRun) { Serial.println ("MINER WORK ABORTED >> waiting new job"); break;}
+
+      // check if 16bit share
+      if(hash[31] !=0 || hash[30] !=0) {
+      //if(!is16BitShare){
+        // increment nonce
+        nonce += 2;
+        continue;
+      }
+
+      //Check target to submit
+      //Difficulty of 1 > 0x00000000FFFF0000000000000000000000000000000000000000000000000000
+      //NM2 pool diff 1e-9 > Target = diff_1 / diff_pool > 0x00003B9ACA00....00
+      //Swapping diff bytes little endian >>>>>>>>>>>>>>>> 0x0000DC59D300....00  
+      //if((hash[29] <= 0xDC) && (hash[28] <= 0x59))     //0x00003B9ACA00  > diff value for 1e-9
+      double diff_hash = diff_from_target(hash);
+
+      // update best diff
+      if (diff_hash > best_diff)
+        best_diff = diff_hash;
+
+      if(diff_hash > mMiner.poolDifficulty)//(hash[29] <= 0x3B)//(diff_hash > 1e-9)
+      {
+        tx_mining_submit(client, mWorker, mJob, nonce);
+        Serial.print("   - Current diff share: "); Serial.println(diff_hash,12);
+        Serial.print("   - Current pool diff : "); Serial.println(mMiner.poolDifficulty,12);
+        Serial.print("   - TX SHARE: ");
+        for (size_t i = 0; i < 32; i++)
+            Serial.printf("%02x", hash[i]);
+        #ifdef DEBUG_MINING
+        Serial.println("");
+        Serial.print("   - Current nonce: "); Serial.println(nonce);
+        Serial.print("   - Current block header: ");
+        for (size_t i = 0; i < 80; i++) {
+            Serial.printf("%02x", mMiner.bytearray_blockheader[i]);
+        }
+        #endif
+        Serial.println("");
+        mLastTXtoPool = millis();  
+      }
+      
+      // check if 32bit share
+      if(hash[29] !=0 || hash[28] !=0) {
+        // increment nonce
+        nonce += 2;
+        continue;
+      }
+      shares++;
+
+      // check if valid header
+      if(checkValid(hash, mMiner.bytearray_target)){
+        Serial.printf("[WORKER] %d CONGRATULATIONS! Valid block found with nonce: %d | 0x%x\n", miner_id, nonce, nonce);
+        valids++;
+        Serial.printf("[WORKER]  %d  Submitted work valid!\n", miner_id);
+        // wait for new job
+        break;
+      }
+      // increment nonce
+      nonce += 2;
+    } // exit if found a valid result or nonce > MAX_NONCE
+
+    //wc_Sha256Free(&sha256);
+    //wc_Sha256Free(midstate);
+
+    mMiner.inRun = false;
+    Serial.print(">>> Finished job waiting new data from pool");
+
+    if(hashes>=MAX_NONCE_STEP) {
+      Mhashes=Mhashes+MAX_NONCE_STEP/1000000;
+      hashes=hashes-MAX_NONCE_STEP;
+    }
+
+    uint32_t duration = micros() - startT;
+    if (esp_task_wdt_reset() == ESP_OK)
+      Serial.print(">>> Resetting watchdog timer");
+  }
+}
+
 #define DELAY 100
 #define REDRAW_EVERY 10
 
